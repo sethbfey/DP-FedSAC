@@ -1,0 +1,7 @@
+[project]
+name = "DP-FedSAC"
+version = "0.1.0"
+description = "Soft Actor-Critic agent for joint adaptive gradient clipping and noise in differentially private federated learning."
+readme = "README.md"
+requires-python = ">=3.13.5"
+dependencies = []
