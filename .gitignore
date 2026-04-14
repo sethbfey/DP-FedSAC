@@ -1,2 +1,11 @@
 # MacOS
 .DS_Store
+
+# Virtual environments
+.venv/
+
+# Client .pt files
+src/data/clients/femnist/*.pt
+
+# LEAF repository contents: https://github.com/TalwalkarLab/leaf
+src/data/leaf/
