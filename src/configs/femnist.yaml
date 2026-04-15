@@ -1,0 +1,17 @@
+# src/config/femnist.yaml
+
+wandb:
+  project_name: "DP-FedSAC"
+  entity: "sethbfey-university-of-south-dakota"
+  log_interval: 10
+
+federated_learning:
+  num_clients: 3597      # all LEAF FEMNIST clients
+  clients_per_round: 100 # K: matches Andrew et al. (2021)
+  num_global_steps: 3000 # T: at epsilon_max=6.72, budget lasts ~5700 rounds (sigma=2.0), so T is the binding limit
+  local_epochs: 1        # E: matches Andrew et al.
+  learning_rate: 0.1     # eta_c: client LR; will be calibrated from running `src/scripts/learning_rate_search.py`
+  server_lr: 1.0         # eta_s: server LR; will be calibrated from running `src/scripts/learning_rate_search.py`
+  batch_size: 32
+  server_momentum: 0.0   # McMahan et al. (2018) DP-FedAvg uses no server momentum
+  dataset: "femnist"
