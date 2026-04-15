@@ -10,8 +10,8 @@ federated_learning:
   clients_per_round: 100 # K: matches Andrew et al. (2021)
   num_global_steps: 3000 # T: at max_epsilon=6.72, budget lasts ~5700 rounds (sigma=2.0), so T is the binding limit
   local_epochs: 1        # E: matches Andrew et al.
-  learning_rate: 0.1     # eta_c: client LR; will be calibrated from running `src/scripts/learning_rate_search.py --config "femnist"`
-  server_lr: 1.0         # eta_s: server LR; will be calibrated from running `src/scripts/learning_rate_search.py --config "femnist"`
+  learning_rate: 0.1     # eta_c: client LR; calibrated from `src/scripts/learning_rate_search.py --config "femnist"`
+  server_lr: 1.0         # eta_s: server LR; calibrated from `src/scripts/learning_rate_search.py --config "femnist"`
   batch_size: 32
   server_momentum: 0.0   # McMahan et al. (2018) DP-FedAvg uses no server momentum
   dataset: "femnist"
