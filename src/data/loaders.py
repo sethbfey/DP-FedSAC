@@ -6,14 +6,13 @@ import torch
 from pathlib import Path
 from torch.utils.data import TensorDataset
 
-
-_ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 # LEAF FEMNIST dataset: https://github.com/TalwalkarLab/leaf
-FEMNIST_ROOT_DIR    = _ROOT_DIR / "src" / "data" / "leaf" / "data" / "femnist"
-FEMNIST_TRAIN_DIR   = _ROOT_DIR / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "train"
-FEMNIST_TEST_DIR    = _ROOT_DIR / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "test"
-FEMNIST_CLIENTS_DIR = _ROOT_DIR / "src" / "data" / "clients" / "femnist"
+FEMNIST_ROOT_DIR    = ROOT / "src" / "data" / "leaf" / "data" / "femnist"
+FEMNIST_TRAIN_DIR   = ROOT / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "train"
+FEMNIST_TEST_DIR    = ROOT / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "test"
+FEMNIST_CLIENTS_DIR = ROOT / "src" / "data" / "clients" / "femnist"
 
 def process_leaf_femnist():
     print("Processing FEMNIST...")
@@ -48,7 +47,7 @@ def process_leaf_femnist():
             data = json.load(f)
 
             for client_id, client_data in data['user_data'].items():
-                # reshape to (N, 1, 28, 28)
+                # Reshape to (N, 1, 28, 28)
                 x = torch.tensor(client_data['x'], dtype=torch.float32).view(-1, 1, 28, 28)
                 y = torch.tensor(client_data['y'], dtype=torch.long)
                 client_train_data[client_id] = TensorDataset(x, y)
