@@ -4,6 +4,17 @@
 # Virtual environments
 .venv/
 
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# WandB local run directory
+src/wandb/
+
 # Client .pt files
 src/data/clients/femnist/*.pt
 
