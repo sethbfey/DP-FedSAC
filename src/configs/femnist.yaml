@@ -20,6 +20,6 @@ differential_privacy:
   rdp_alpha: 10              # RDP accounting divergence order
   target_delta: 0.00001      # (epsilon, delta)-DP failure probability delta
   max_epsilon: 6.72          # Total RDP budget; final (epsilon, delta)-DP ≈ (8.0, 1e-5)
-  max_clipping_norm: 0.7336  # Calibrated from `python src/scripts/train_baselines.py --baseline fedavg`
+  max_clipping_norm: 0.7336  # Calibrated from `python src/scripts/train_baselines.py --baseline fedavg --config "femnist"`
   max_noise_multiplier: 5.0  # Upper bound for sigma_t
   min_noise_multiplier: 2.0  # Lower bound for sigma_t
