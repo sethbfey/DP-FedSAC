@@ -23,3 +23,13 @@ differential_privacy:
   max_clipping_norm: 0.7336  # Calibrated from `python src/scripts/train_baselines.py --baseline fedavg --config "femnist"`
   max_noise_multiplier: 5.0  # Upper bound for sigma_t
   min_noise_multiplier: 2.0  # Lower bound for sigma_t
+
+sac_agent:
+  gamma: 0.99       # Discount factor
+  tau_rho: 0.005    # EMA smoothing coefficient for target network updates
+  alpha_ent: 0.2    # Temperature parameter for entropy maximization
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  buffer_size: 1000000
+  batch_size: 256
+  reward_beta: 0.01 # Beta in r_t = delta_acc - beta*(delta_eps/eps_max); swept in Phase 3

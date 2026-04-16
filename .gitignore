@@ -16,7 +16,10 @@ wheels/
 src/wandb/
 
 # Client .pt files
-src/data/clients/femnist/*.pt
+src/data/clients/**/*.pt
+
+# Checkpoint files
+src/checkpoints/**/*.pt
 
 # LEAF repository contents: https://github.com/TalwalkarLab/leaf
 src/data/leaf/
