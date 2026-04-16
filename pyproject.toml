@@ -5,6 +5,7 @@ description = "Soft Actor-Critic agent for joint adaptive gradient clipping and 
 readme = "README.md"
 requires-python = ">=3.13.5"
 dependencies = [
+    "gymnasium>=1.2.3",
     "numpy>=2.4.4",
     "pillow>=12.2.0",
     "torch>=2.11.0",

@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.cnn import FEMNIST_CNN
+from utils.rdp import rdp_per_round
 
 def load_config(config_path: Path):
     with config_path.open('r') as f:
@@ -53,26 +54,6 @@ def load_data(config, dataset_name):
     val_loader = DataLoader(val, batch_size=256, shuffle=False)
     print("Done loading\n")
     return datasets, val_loader
-
-# Per-round RDP cost of the Poisson-subsample Gaussian mechanism
-#   Wang et al. (2019) "Subsampled Rényi Differential Privacy and Analytical Moments Accountant."
-#   https://arxiv.org/abs/1908.10530
-def rdp_per_round(alpha, sigma, q):
-    if alpha < 2 or not isinstance(alpha, int):
-        raise ValueError("alpha must be an INT >= 2")
-
-    log_terms = []
-
-    for k in range(alpha + 1):
-        log_binom     = (math.lgamma(alpha + 1) - math.lgamma(k + 1) - math.lgamma(alpha - k + 1))
-        log_q_power   = k * math.log(q) if k > 0 else 0.0
-        log_1mq_power = (alpha - k) * math.log(1.0 - q) if alpha - k > 0 else 0.0
-        log_gauss     = k * (k - 1) / (2.0 * sigma ** 2)
-        log_terms.append(log_binom + log_q_power + log_1mq_power + log_gauss)
-
-    max_log = max(log_terms)
-    log_sum = max_log + math.log(sum(math.exp(t - max_log) for t in log_terms))
-    return log_sum / (alpha - 1)
 
 def select_clients(round_t, num_clients, k):
     selected_clients = np.random.default_rng(2026 + round_t).choice(num_clients, size=k, replace=False)
