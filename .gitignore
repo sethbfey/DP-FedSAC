@@ -13,7 +13,7 @@ dist/
 wheels/
 
 # WandB local run directory
-src/wandb/
+wandb/
 
 # Client files
 src/data/clients/
@@ -23,3 +23,7 @@ src/checkpoints/
 
 # LEAF repository contents: https://github.com/TalwalkarLab/leaf
 src/data/leaf/
+
+# Etcetera
+tea_debug.log
+notes.md
