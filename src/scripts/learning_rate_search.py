@@ -57,7 +57,7 @@ def load_data(config, dataset_name):
     return datasets, val_loader
 
 # A single FedAvg run using an LR combination
-def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, device):
+def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, device, dataset_name):
     criterion = nn.CrossEntropyLoss()
     model     = FEMNIST_CNN().to(device)
 
@@ -74,19 +74,12 @@ def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, de
     run = wandb.init(
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
-        name=f'LR-ec{eta_c}-es{eta_s}',
-        group='LR-Search',
-        tags=['lr-search', 'fedavg'],
+        group=f'{dataset_name}/lr-search',
+        name=f'eta_c={eta_c}/eta_s={eta_s}',
         config={
-            'eta_c':             eta_c,
-            'eta_s':             eta_s,
-            'server_momentum':   beta,
-            'clients_per_round': K,
-            'num_clients':       N,
-            'local_epochs':      E,
-            'batch_size':        bs,
-            'max_rounds':        max_rounds,
-            'es_patience':       patience,
+            'eta_c': eta_c, 'eta_s': eta_s, 'server_momentum': beta,
+            'K': K, 'N': N, 'E': E, 'batch_size': bs,
+            'max_rounds': max_rounds, 'patience': patience,
         },
         reinit=True,
     )
@@ -141,7 +134,7 @@ def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, de
 
         model.train()
         acc = correct / total
-        wandb.log({'round': t + 1, 'val_accuracy': acc})
+        wandb.log({'round': t + 1, 'val_acc': acc})
 
         if acc > best_acc:
             best_acc      = acc
@@ -159,7 +152,7 @@ def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, de
                 f"best={best_acc:.4f}  patience={patience_left}"
             )
 
-    wandb.summary['peak_val_accuracy'] = best_acc
+    wandb.summary['peak_val_acc'] = best_acc
     wandb.finish()
     return best_acc
 
@@ -188,7 +181,7 @@ def main():
         for eta_s in ETA_S_GRID:
             done += 1
             print(f"\n[{done}/{total}] eta_c={eta_c} eta_s={eta_s}")
-            acc = run_one(config, datasets, val_loader, eta_c, eta_s, args.rounds, args.patience, device)
+            acc = run_one(config, datasets, val_loader, eta_c, eta_s, args.rounds, args.patience, device, args.config)
             results[(eta_c, eta_s)] = acc
             print(f"  -> peak_acc={acc:.4f}")
 

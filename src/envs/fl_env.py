@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from models.cnn import FEMNIST_CNN
+from models.registry import get_model
 from utils.rdp import rdp_per_round
 
 # Synchronous DP-FedAvg environment for the DP-FedSAC agent.
@@ -68,9 +68,9 @@ class FL_DP_Env(gym.Env):
         else:
             self.device = torch.device('cpu')
 
-        # Load client data and global validation data
         ROOT        = Path(__file__).resolve().parent.parent.parent
         dataset     = config['federated_learning']['dataset']
+        self.model_cls = get_model(dataset)
         clients_dir = ROOT / 'src' / 'data' / 'clients' / dataset
 
         print(f"Loading {self.num_clients} client datasets from {clients_dir}...")
@@ -83,7 +83,7 @@ class FL_DP_Env(gym.Env):
         print("Datasets loaded.")
 
         self.criterion = nn.CrossEntropyLoss()
-        self.global_model = FEMNIST_CNN().to(self.device)
+        self.global_model = self.model_cls().to(self.device)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -94,7 +94,7 @@ class FL_DP_Env(gym.Env):
         self.sigma_prev      = self.min_sigma
         self.momentum_buf    = None
 
-        self.global_model = FEMNIST_CNN().to(self.device)
+        self.global_model = self.model_cls().to(self.device)
         return self._make_obs(f_clip=0.0, m_norm=0.0), {}
 
     def step(self, action):

@@ -77,23 +77,24 @@ def train(train_config, args, agent, start_episode=1, total_steps=0,
             C_hist.append(info['C_t'])
             sigma_hist.append(info['sigma_t'])
 
-        log = {
+        c1 = update_metrics.get('critic1_loss', float('nan'))
+        c2 = update_metrics.get('critic2_loss', float('nan'))
+        wandb.log({
             'episode':        episode,
             'episode_reward': ep_reward,
             'episode_rounds': ep_rounds,
-            'final_accuracy': info['acc_after'],
+            'final_val_acc':  info['acc_after'],
             'final_epsilon':  env.current_epsilon,
             'mean_C_t':       float(np.mean(C_hist)),
             'mean_sigma_t':   float(np.mean(sigma_hist)),
-            'buffer_size':    len(agent.replay_buffer),
-            'total_steps':    total_steps,
-        }
-        log.update(update_metrics)
-        wandb.log(log)
+            'actor_loss':     update_metrics.get('actor_loss', float('nan')),
+            'critic_loss':    float(np.mean([c1, c2])),
+            'alpha':          update_metrics.get('alpha', float('nan')),
+        })
 
         print(f"[ep {episode:>4}/{args.num_episodes}]  "
               f"reward={ep_reward:+.4f}  rounds={ep_rounds}  "
-              f"acc={info['acc_after']:.4f}  ε={env.current_epsilon:.3f}  "
+              f"val_acc={info['acc_after']:.4f}  ε={env.current_epsilon:.3f}  "
               f"mean_C={np.mean(C_hist):.4f}  mean_σ={np.mean(sigma_hist):.4f}  "
               f"α={update_metrics.get('alpha', float('nan')):.4f}")
 
@@ -105,48 +106,57 @@ def train(train_config, args, agent, start_episode=1, total_steps=0,
 
     return agent
 
-def evaluate(config, agent, num_eval_episodes=3):
+def evaluate(config, agent, num_eval_episodes=1):
     print(f"\n{'='*60}")
     print(f"Final evaluation — {num_eval_episodes} episodes")
     print(f"{'='*60}")
 
-    env       = FL_DP_Env(config, is_training_agent=False)
-    acc_list  = []
-    eps_list  = []
-    rew_list  = []
+    env      = FL_DP_Env(config, is_training_agent=False)
+    acc_list = []
+    eps_list = []
+    rew_list = []
 
     for ep in range(1, num_eval_episodes + 1):
         obs, _ = env.reset()
         done      = False
         ep_reward = 0.0
         info      = {}
-        C_hist, sigma_hist = [], []
+        round_num = 0
 
         while not done:
             action = agent.select_action(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             ep_reward += reward
-            C_hist.append(info['C_t'])
-            sigma_hist.append(info['sigma_t'])
+            round_num += 1
+
+            wandb.log({
+                'round':         round_num,
+                'val_acc':       info['acc_after'],
+                'epsilon':       env.current_epsilon,
+                'delta_epsilon': info['delta_epsilon'],
+                'f_clip':        info['f_clip'],
+                'm_norm':        info['m_norm'],
+                'C_t':           info['C_t'],
+                'sigma_t':       info['sigma_t'],
+            })
 
         acc_list.append(info['acc_after'])
         eps_list.append(env.current_epsilon)
         rew_list.append(ep_reward)
 
-        print(f"  eval ep {ep}: acc={info['acc_after']:.4f}  ε={env.current_epsilon:.3f}  "
-              f"reward={ep_reward:+.4f}  "
-              f"mean_C={np.mean(C_hist):.4f}  mean_σ={np.mean(sigma_hist):.4f}")
+        print(f"  eval ep {ep}: val_acc={info['acc_after']:.4f}  ε={env.current_epsilon:.3f}  "
+              f"reward={ep_reward:+.4f}  rounds={round_num}")
 
     mean_acc = float(np.mean(acc_list))
     mean_eps = float(np.mean(eps_list))
     mean_rew = float(np.mean(rew_list))
 
-    print(f"\n  mean_acc={mean_acc:.4f}  mean_ε={mean_eps:.4f}  mean_reward={mean_rew:+.4f}")
+    print(f"\n  mean_val_acc={mean_acc:.4f}  mean_ε={mean_eps:.4f}  mean_reward={mean_rew:+.4f}")
 
-    wandb.summary['eval_mean_accuracy'] = mean_acc
-    wandb.summary['eval_mean_epsilon']  = mean_eps
-    wandb.summary['eval_mean_reward']   = mean_rew
+    wandb.summary['eval_mean_val_acc'] = mean_acc
+    wandb.summary['eval_mean_epsilon'] = mean_eps
+    wandb.summary['eval_mean_reward']  = mean_rew
 
     return mean_acc, mean_eps
 
@@ -193,29 +203,50 @@ def main():
         probe = torch.load(args.resume, map_location='cpu', weights_only=False)
         saved_run_id = probe.get('wandb_run_id', None)
 
+    fl  = config['federated_learning']
+    dp  = config['differential_privacy']
+    sac = config['sac_agent']
+
     run = wandb.init(
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
-        name=f'DP-FedSAC-{args.config}-beta{beta}',
-        group=f'{args.config}-DP-FedSAC',
-        tags=['dp-fedsac', args.config, 'sac'],
+        group=f'{args.config}/dp-fedsac',
+        name=f'beta={beta}',
         id=saved_run_id,
         resume='allow' if saved_run_id else None,
         config={
-            'algorithm':        'DP-FedSAC',
-            'dataset':          args.config,
-            'reward_beta':      beta,
-            'num_episodes':     args.num_episodes,
-            'train_rounds':     train_config['federated_learning']['num_global_steps'],
-            'warmup_episodes':  args.warmup_episodes,
-            'updates_per_step': args.updates_per_step,
-            **{f'fl_{k}': v for k, v in config['federated_learning'].items()},
-            **{f'dp_{k}': v for k, v in config['differential_privacy'].items()},
-            **{f'sac_{k}': v for k, v in config['sac_agent'].items()},
+            'N': fl['num_clients'], 'K': fl['clients_per_round'],
+            'T': train_config['federated_learning']['num_global_steps'],
+            'E': fl['local_epochs'], 'eta_c': fl['learning_rate'],
+            'eta_s': fl['server_lr'], 'server_momentum': fl['server_momentum'],
+            'batch_size': fl['batch_size'],
+            'C_max': dp['max_clipping_norm'], 'sigma_min': dp['min_noise_multiplier'],
+            'sigma_max': dp['max_noise_multiplier'], 'rdp_alpha': dp['rdp_alpha'],
+            'max_epsilon': dp['max_epsilon'],
+            'reward_beta': beta, 'num_episodes': args.num_episodes,
+            'train_rounds': train_config['federated_learning']['num_global_steps'],
+            'warmup_episodes': args.warmup_episodes, 'updates_per_step': args.updates_per_step,
+            'gamma': sac['gamma'], 'tau': sac['tau_rho'], 'actor_lr': sac['actor_lr'],
         }
     )
     wandb.define_metric('episode')
-    wandb.define_metric('*', step_metric='episode')
+    wandb.define_metric('round')
+    wandb.define_metric('val_acc',       step_metric='round')
+    wandb.define_metric('epsilon',       step_metric='round')
+    wandb.define_metric('delta_epsilon', step_metric='round')
+    wandb.define_metric('f_clip',        step_metric='round')
+    wandb.define_metric('m_norm',        step_metric='round')
+    wandb.define_metric('C_t',           step_metric='round')
+    wandb.define_metric('sigma_t',       step_metric='round')
+    wandb.define_metric('episode_reward',  step_metric='episode')
+    wandb.define_metric('final_val_acc',   step_metric='episode')
+    wandb.define_metric('final_epsilon',   step_metric='episode')
+    wandb.define_metric('mean_C_t',        step_metric='episode')
+    wandb.define_metric('mean_sigma_t',    step_metric='episode')
+    wandb.define_metric('episode_rounds',  step_metric='episode')
+    wandb.define_metric('actor_loss',      step_metric='episode')
+    wandb.define_metric('critic_loss',     step_metric='episode')
+    wandb.define_metric('alpha',           step_metric='episode')
 
     checkpoint_dir = ROOT / 'src' / 'checkpoints' / args.config / f'beta_{beta}'
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
