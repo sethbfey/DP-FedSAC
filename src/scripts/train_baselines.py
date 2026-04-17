@@ -42,9 +42,9 @@ def get_device():
     return torch.device('cpu')
 
 def load_data(config, dataset_name):
-    clients_dir = ROOT / 'data' / 'clients' / dataset_name
+    clients_dir = ROOT / 'src' / 'data' / 'clients' / dataset_name
     N = config['federated_learning']['num_clients']
-    
+
     print(f"Loading {N} client datasets from {clients_dir}...")
     datasets = [
         torch.load(clients_dir / f'client_{i}.pt', weights_only=False)
