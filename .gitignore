@@ -25,6 +25,7 @@ src/checkpoints/
 src/data/leaf/
 
 # Etcetera
+paper/
 tea_debug.log
 notes.md
 new_model_template.md

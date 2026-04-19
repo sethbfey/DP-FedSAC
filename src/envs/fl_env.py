@@ -59,7 +59,13 @@ class FL_DP_Env(gym.Env):
         self.current_epsilon = 0.0
         self.C_prev          = self.max_clip
         self.sigma_prev      = self.min_sigma
-        self.momentum_buf    = None 
+        self.momentum_buf    = None
+
+        # Pre-staged round stats: deltas trained against the current global model
+        # before the agent has chosen (C_t, sigma_t)
+        self._pending_deltas = None
+        self._pending_f_clip = 0.0
+        self._pending_m_norm = 0.0
 
         if torch.backends.mps.is_available():
             self.device = torch.device('mps')
@@ -95,7 +101,11 @@ class FL_DP_Env(gym.Env):
         self.momentum_buf    = None
 
         self.global_model = self.model_cls().to(self.device)
-        return self._make_obs(f_clip=0.0, m_norm=0.0), {}
+
+        # Pre-stage round 0 so the initial observation already carries
+        # f_t^clip and m_t^norm computed against C_prev = C_max.
+        self._stage_next_round()
+        return self._make_obs(self._pending_f_clip, self._pending_m_norm), {}
 
     def step(self, action):
         # Scale actions
@@ -107,23 +117,12 @@ class FL_DP_Env(gym.Env):
         delta_epsilon = rdp_per_round(int(self.rdp_alpha), sigma_t, q)
         self.current_epsilon += delta_epsilon
 
-        # Evaluate accuracy before global model update (for reward calc)
+        # Cached round stats observed before action selection
+        pre_action_f_clip = self._pending_f_clip
+        pre_action_m_norm = self._pending_m_norm
+        raw_deltas        = self._pending_deltas
+
         acc_before = self._eval_accuracy()
-
-        # Sample K clients; deterministic per round when not training the agent
-        if self.is_training_agent:
-            client_rng = np.random.default_rng()
-        else:
-            client_rng = np.random.default_rng(2026 + self.current_round)
-        selected = client_rng.choice(self.num_clients, size=self.clients_per_round, replace=False)
-
-        # Fetch raw client updates
-        raw_deltas = [self._local_train(int(cid)) for cid in selected]
-
-        # Raw client update stats
-        raw_norms = torch.stack([dw.norm(2) for dw in raw_deltas])
-        f_clip    = float((raw_norms > C_t).float().mean().item())
-        m_norm    = float(raw_norms.median().item())
 
         # DP-FedAvg: clip -> sum -> add noise -> divide by K -> momentum -> server step
         with torch.no_grad():
@@ -162,18 +161,39 @@ class FL_DP_Env(gym.Env):
         terminated = self.current_epsilon >= self.max_epsilon
         truncated  = (not terminated) and (self.current_round >= self.max_rounds)
 
-        obs  = self._make_obs(f_clip, m_norm)
+        # Pre-stage next round so next observation carries the round's pre-action stats.
+        # On terminal/truncated transitions the cached stats are stale but the SAC
+        # update gates the next-state value with (1 - done), so they are unused.
+        if not (terminated or truncated):
+            self._stage_next_round()
+
+        obs  = self._make_obs(self._pending_f_clip, self._pending_m_norm)
         info = {
             'C_t':           C_t,
             'sigma_t':       sigma_t,
             'delta_epsilon': delta_epsilon,
-            'f_clip':        f_clip,
-            'm_norm':        m_norm,
+            'f_clip':        pre_action_f_clip,
+            'm_norm':        pre_action_m_norm,
             'acc_before':    acc_before,
             'acc_after':     acc_after,
         }
 
         return obs, reward, terminated, truncated, info
+
+    def _stage_next_round(self):
+        # Sample K clients; deterministic per round when not training the agent
+        if self.is_training_agent:
+            client_rng = np.random.default_rng()
+        else:
+            client_rng = np.random.default_rng(2026 + self.current_round)
+        selected = client_rng.choice(self.num_clients, size=self.clients_per_round, replace=False)
+
+        raw_deltas = [self._local_train(int(cid)) for cid in selected]
+        raw_norms  = torch.stack([dw.norm(2) for dw in raw_deltas])
+
+        self._pending_deltas = raw_deltas
+        self._pending_f_clip = float((raw_norms > self.C_prev).float().mean().item())
+        self._pending_m_norm = float(raw_norms.median().item())
 
     def _make_obs(self, f_clip, m_norm):
         return np.array([
