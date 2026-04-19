@@ -3,10 +3,13 @@
 # $ python src/scripts/train_dp_scaffold.py
 #     --config  [STR,   default="femnist"]
 #     --sigma_t [FLOAT, default=2.0]
+#     --seed    [INT,   default=0]
 
 import sys
 import copy
+import random
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import wandb
@@ -71,7 +74,7 @@ def local_train_scaffold(global_model, dataset, config, criterion, device, clien
 
     return delta_w, actual_steps
 
-def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name):
+def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name, seed):
     device     = get_device()
     criterion  = nn.CrossEntropyLoss()
     model      = get_model(dataset_name)().to(device)
@@ -101,7 +104,7 @@ def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name):
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/dp-scaffold',
-        name=f'sigma={sigma_t}',
+        name=f'sigma={sigma_t}_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
@@ -114,6 +117,7 @@ def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name):
             'rdp_alpha':       rdp_alpha,
             'max_epsilon':     max_eps,
             'delta_eps_per_round': delta_eps_per_round,
+            'seed':                seed,
         }
     )
     wandb.define_metric('round')
@@ -207,7 +211,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config',  type=str,   default='femnist')
     parser.add_argument('--sigma_t', type=float, default=2.0)
+    parser.add_argument('--seed',    type=int,   default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -222,6 +232,7 @@ def main():
         val_loader=val_loader,
         sigma_t=args.sigma_t,
         dataset_name=args.config,
+        seed=args.seed,
     )
 
 

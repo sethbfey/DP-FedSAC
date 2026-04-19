@@ -4,9 +4,11 @@
 #     --config       [STR,   default="femnist"]
 #     --es_patience  [INT,   default=200]
 #     --es_min_delta [FLOAT, default=1e-4]
+#     --seed         [INT,   default=0]
 
 import re
 import sys
+import random
 import argparse
 import numpy as np
 import torch
@@ -25,7 +27,7 @@ def write_max_clipping_norm_to_config(config_path: Path, p75):
     content = re.sub(r'(max_clipping_norm:\s*)[0-9.]+', rf'\g<1>{p75:.4f}', content)
     config_path.write_text(content)
 
-def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name,
+def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name, seed,
                es_patience=200, es_min_delta=1e-4):
     device    = get_device()
     criterion = nn.CrossEntropyLoss()
@@ -46,7 +48,7 @@ def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name,
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/fedavg',
-        name='fedavg',
+        name=f'fedavg_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
@@ -54,6 +56,7 @@ def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name,
             'eta_s':           server_lr,
             'server_momentum': server_mo,
             'batch_size':      config['federated_learning']['batch_size'],
+            'seed':            seed,
         }
     )
     wandb.define_metric('round')
@@ -122,7 +125,13 @@ def main():
     parser.add_argument('--config',       type=str,   default='femnist')
     parser.add_argument('--es_patience',  type=int,   default=200)
     parser.add_argument('--es_min_delta', type=float, default=1e-4)
+    parser.add_argument('--seed',         type=int,   default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -137,6 +146,7 @@ def main():
         client_datasets=client_datasets,
         val_loader=val_loader,
         dataset_name=args.config,
+        seed=args.seed,
         es_patience=args.es_patience,
         es_min_delta=args.es_min_delta,
     )

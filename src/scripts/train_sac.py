@@ -11,15 +11,18 @@
 #     --checkpoint_interval [INT, default=1]
 #     --save_path           [STR, default=src/checkpoints/<config>/beta_<beta>/sac_episode_<num_episodes>.pt]
 #     --resume              [STR, default=None]
+#     --seed                [INT, default=0]
 
 # Evaluation (is_training_agent=False, fixed per-round seeds):
 # $ python src/scripts/train_sac.py --eval_only
 #     --config        [STR, default="femnist"]
 #     --eval_episodes [INT, default=1]
 #     --resume        [STR, required]
+#     --seed          [INT, default=0]
 
 import sys
 import copy
+import random
 import argparse
 import yaml
 import numpy as np
@@ -173,7 +176,13 @@ def main():
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--checkpoint_interval', type=int, default=1)
     parser.add_argument('--eval_only', action='store_true')
+    parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -211,7 +220,7 @@ def main():
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{args.config}/dp-fedsac',
-        name=f'beta={beta}',
+        name=f'beta={beta}_seed={args.seed}',
         id=saved_run_id,
         resume='allow' if saved_run_id else None,
         config={
@@ -227,6 +236,7 @@ def main():
             'train_rounds': train_config['federated_learning']['num_global_steps'],
             'warmup_episodes': args.warmup_episodes, 'updates_per_step': args.updates_per_step,
             'gamma': sac['gamma'], 'tau': sac['tau_rho'], 'actor_lr': sac['actor_lr'],
+            'seed': args.seed,
         }
     )
     wandb.define_metric('episode')

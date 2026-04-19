@@ -3,8 +3,10 @@
 # $ python src/scripts/train_dp_fedavg.py
 #     --config  [STR,   default="femnist"]
 #     --sigma_t [FLOAT, default=2.0]
+#     --seed    [INT,   default=0]
 
 import sys
+import random
 import argparse
 import numpy as np
 import torch
@@ -19,7 +21,7 @@ from models.registry import get_model
 from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
 from utils.rdp       import rdp_per_round
 
-def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name):
+def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name, seed):
     device    = get_device()
     criterion = nn.CrossEntropyLoss()
     model     = get_model(dataset_name)().to(device)
@@ -42,7 +44,7 @@ def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name):
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/dp-fedavg',
-        name=f'sigma={sigma_t}',
+        name=f'sigma={sigma_t}_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
@@ -54,6 +56,7 @@ def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name):
             'sigma_t':         sigma_t,
             'rdp_alpha':       rdp_alpha,
             'max_epsilon':     max_eps,
+            'seed':            seed,
         }
     )
     wandb.define_metric('round')
@@ -115,7 +118,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config',  type=str,   default='femnist')
     parser.add_argument('--sigma_t', type=float, default=2.0)
+    parser.add_argument('--seed',    type=int,   default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -130,6 +139,7 @@ def main():
         val_loader=val_loader,
         sigma_t=args.sigma_t,
         dataset_name=args.config,
+        seed=args.seed,
     )
 
 if __name__ == '__main__':

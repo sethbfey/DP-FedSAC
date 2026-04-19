@@ -5,9 +5,12 @@
 #     --sigma_t  [FLOAT, default=2.0]
 #     --K_save   [INT,   default=50]
 #     --T_n_frac [FLOAT, default=0.5]
+#     --seed     [INT,   default=0]
 
 import sys
+import random
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import wandb
@@ -20,7 +23,7 @@ from models.registry import get_model
 from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
 from utils.rdp       import rdp_per_round
 
-def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_frac, dataset_name):
+def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_frac, dataset_name, seed):
     device    = get_device()
     criterion = nn.CrossEntropyLoss()
     model     = get_model(dataset_name)().to(device)
@@ -47,7 +50,7 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/time-adaptive',
-        name=f'sigma={sigma_t}_K_save={K_save}',
+        name=f'sigma={sigma_t}_K_save={K_save}_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
@@ -62,6 +65,7 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
             'T_n_frac':        T_n_frac,
             'rdp_alpha':       rdp_alpha,
             'max_epsilon':     max_eps,
+            'seed':            seed,
         }
     )
     wandb.define_metric('round')
@@ -131,7 +135,13 @@ def main():
     parser.add_argument('--sigma_t',   type=float, default=2.0)
     parser.add_argument('--K_save',    type=int,   default=50)
     parser.add_argument('--T_n_frac',  type=float, default=0.5)
+    parser.add_argument('--seed',      type=int,   default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -148,6 +158,7 @@ def main():
         K_save=args.K_save,
         T_n_frac=args.T_n_frac,
         dataset_name=args.config,
+        seed=args.seed,
     )
 
 if __name__ == '__main__':

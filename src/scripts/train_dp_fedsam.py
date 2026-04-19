@@ -4,10 +4,13 @@
 #     --config  [STR,   default="femnist"]
 #     --sigma_t [FLOAT, default=2.0]
 #     --rho     [FLOAT, default=0.05]
+#     --seed    [INT,   default=0]
 
 import sys
 import copy
+import random
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import wandb
@@ -75,7 +78,7 @@ def local_train_sam(global_model, dataset, config, criterion, device, rho):
         ])
     return delta_w
 
-def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_name):
+def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_name, seed):
     device    = get_device()
     criterion = nn.CrossEntropyLoss()
     model     = get_model(dataset_name)().to(device)
@@ -98,7 +101,7 @@ def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_nam
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/dp-fedsam',
-        name=f'sigma={sigma_t}_rho={rho}',
+        name=f'sigma={sigma_t}_rho={rho}_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
@@ -111,6 +114,7 @@ def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_nam
             'rho':             rho,
             'rdp_alpha':       rdp_alpha,
             'max_epsilon':     max_eps,
+            'seed':            seed,
         }
     )
     wandb.define_metric('round')
@@ -173,7 +177,13 @@ def main():
     parser.add_argument('--config',  type=str,   default='femnist')
     parser.add_argument('--sigma_t', type=float, default=2.0)
     parser.add_argument('--rho',     type=float, default=0.05)
+    parser.add_argument('--seed',    type=int,   default=0)
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
@@ -189,6 +199,7 @@ def main():
         sigma_t=args.sigma_t,
         rho=args.rho,
         dataset_name=args.config,
+        seed=args.seed,
     )
 
 if __name__ == '__main__':
