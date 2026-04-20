@@ -25,8 +25,10 @@ src/checkpoints/
 src/data/leaf/
 
 # Etcetera
+slurm/
 paper/
 tea_debug.log
 notes.md
 new_model_template.md
+hpc_setup.md
 experiments.md
