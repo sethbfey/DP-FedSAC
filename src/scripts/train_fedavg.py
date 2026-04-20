@@ -1,12 +1,9 @@
 # src/scripts/train_fedavg.py
 
 # $ python src/scripts/train_fedavg.py
-#     --config       [STR,   default="femnist"]
-#     --es_patience  [INT,   default=200]
-#     --es_min_delta [FLOAT, default=1e-4]
-#     --seed         [INT,   default=0]
+#     --config [STR, default="femnist"]
+#     --seed   [INT, default=0]
 
-import re
 import sys
 import random
 import argparse
@@ -22,13 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from models.registry import get_model
 from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
 
-def write_max_clipping_norm_to_config(config_path: Path, p75):
-    content = config_path.read_text()
-    content = re.sub(r'(max_clipping_norm:\s*)[0-9.]+', rf'\g<1>{p75:.4f}', content)
-    config_path.write_text(content)
-
-def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name, seed,
-               es_patience=200, es_min_delta=1e-4):
+def run_fedavg(config, client_datasets, val_loader, dataset_name, seed):
     device    = get_device()
     criterion = nn.CrossEntropyLoss()
     model     = get_model(dataset_name)().to(device)
@@ -39,10 +30,8 @@ def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name, s
     server_lr = config['federated_learning']['server_lr']
     server_mo = config['federated_learning']['server_momentum']
 
-    all_norms      = []
-    best_val_loss  = float('inf')
-    patience_count = 0
-    momentum_buf   = None
+    all_norms    = []
+    momentum_buf = None
 
     wandb.init(
         project=config['wandb']['project_name'],
@@ -89,19 +78,8 @@ def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name, s
             'grad_norm_p75': float(np.percentile(raw_norms_t, 75)),
         })
 
-        if (t + 1) % 50 == 0:
-            print(f"[FedAvg] round={t+1:>4}  loss={loss:.4f}  val_acc={acc:.4f}  "
-                  f"norm_p75={np.percentile(raw_norms_t, 75):.4f}  "
-                  f"patience={patience_count}/{es_patience}")
-
-        if loss < best_val_loss - es_min_delta:
-            best_val_loss  = loss
-            patience_count = 0
-        else:
-            patience_count += 1
-            if patience_count >= es_patience:
-                print(f"\n[FedAvg] Early stop at round {t+1}")
-                break
+        print(f"[FedAvg] round={t+1:>4}  loss={loss:.4f}  val_acc={acc:.4f}  "
+              f"norm_p75={np.percentile(raw_norms_t, 75):.4f}")
 
     norms_array = np.array(all_norms, dtype=np.float32)
     p75 = float(np.percentile(norms_array, 75))
@@ -109,23 +87,17 @@ def run_fedavg(config, config_path, client_datasets, val_loader, dataset_name, s
     print(f"\n[FedAvg] Gradient norm percentiles across all rounds:")
     for pct in [50, 75, 90, 95]:
         print(f"  p{pct}: {np.percentile(norms_array, pct):.4f}")
-    print(f"\n  -> C_max = p75 = {p75:.4f}; writing to {config_path}")
 
     wandb.summary['c_max']          = p75
     wandb.summary['final_val_acc']  = acc
     wandb.summary['final_val_loss'] = loss
-    wandb.summary['total_rounds']   = t + 1
+    wandb.summary['total_rounds']   = T
     wandb.finish()
-
-    write_max_clipping_norm_to_config(config_path, p75)
-    print(f"  {config_path.name} max_clipping_norm updated to {p75:.4f}\n")
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',       type=str,   default='femnist')
-    parser.add_argument('--es_patience',  type=int,   default=200)
-    parser.add_argument('--es_min_delta', type=float, default=1e-4)
-    parser.add_argument('--seed',         type=int,   default=0)
+    parser.add_argument('--config', type=str, default='femnist')
+    parser.add_argument('--seed',   type=int, default=0)
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -142,13 +114,10 @@ def main():
 
     run_fedavg(
         config=config,
-        config_path=config_path,
         client_datasets=client_datasets,
         val_loader=val_loader,
         dataset_name=args.config,
         seed=args.seed,
-        es_patience=args.es_patience,
-        es_min_delta=args.es_min_delta,
     )
 
 if __name__ == '__main__':
