@@ -3,8 +3,8 @@
 # $ python src/scripts/train_time_adaptive.py
 #     --config   [STR,   default="femnist"]
 #     --sigma_t  [FLOAT, default=2.0]
-#     --K_save   [INT,   default=50]
-#     --T_n_frac [FLOAT, default=0.5]
+#     --K_save   [INT,   default=75]
+#     --T_n_frac [FLOAT, default=0.3]
 #     --seed     [INT,   default=0]
 
 import sys
@@ -85,6 +85,8 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
         selected   = select_clients(t, N, k_this_round)
         raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device)
                       for cid in selected]
+        raw_deltas = [dw for dw in raw_deltas if torch.isfinite(dw).all()]
+        n_nan      = k_this_round - len(raw_deltas)
 
         raw_norms = torch.stack([dw.norm(2) for dw in raw_deltas])
         f_clip    = float((raw_norms > c_fixed).float().mean().item())
@@ -111,6 +113,7 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
             'f_clip':        f_clip,
             'm_norm':        m_norm,
             'K_t':           k_this_round,
+            'n_nan':         n_nan,
         })
 
         print(f"[TimeAdaptive] round={t+1:>4}  phase={'save ' if in_saving else 'spend'}  "
