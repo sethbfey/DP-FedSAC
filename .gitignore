@@ -27,8 +27,10 @@ src/data/leaf/
 # Etcetera
 slurm/
 paper/
+presentation/
 tea_debug.log
 notes.md
 new_model_template.md
 hpc_setup.md
 experiments.md
+cifar10_experimentation_plan.md

@@ -2,17 +2,24 @@
 
 import json
 import subprocess
+import numpy as np
 import torch
+import torchvision
+import torchvision.transforms as T
 from pathlib import Path
 from torch.utils.data import TensorDataset
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-# LEAF FEMNIST dataset: https://github.com/TalwalkarLab/leaf
+# LEAF FEMNIST dataset
 FEMNIST_ROOT_DIR    = ROOT / "src" / "data" / "leaf" / "data" / "femnist"
 FEMNIST_TRAIN_DIR   = ROOT / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "train"
 FEMNIST_TEST_DIR    = ROOT / "src" / "data" / "leaf" / "data" / "femnist" / "data" / "test"
 FEMNIST_CLIENTS_DIR = ROOT / "src" / "data" / "clients" / "femnist"
+
+# CIFAR-10 dataset
+CIFAR10_CLIENTS_DIR = ROOT / "src" / "data" / "clients" / "cifar10"
+CIFAR10_DOWNLOAD_DIR = ROOT / "src" / "data" / "cifar10_raw"
 
 def process_leaf_femnist():
     print("Processing FEMNIST...")
@@ -78,6 +85,52 @@ def process_leaf_femnist():
     torch.save(global_val_dataset, FEMNIST_CLIENTS_DIR / "global_val.pt")
     print("FEMNIST PROCESSING COMPLETE")
 
+def process_cifar10(alpha=0.3, num_clients=100, seed=2026):
+    CIFAR10_CLIENTS_DIR.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
+
+    transform = T.Compose([
+        T.ToTensor(),
+        T.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
+    ])
+
+    train_ds = torchvision.datasets.CIFAR10(root=CIFAR10_DOWNLOAD_DIR, train=True,  download=True, transform=transform)
+    test_ds  = torchvision.datasets.CIFAR10(root=CIFAR10_DOWNLOAD_DIR, train=False, download=True, transform=transform)
+
+    targets = np.array(train_ds.targets)
+    num_classes = 10
+    client_indices = [[] for _ in range(num_clients)]
+
+    for c in range(num_classes):
+        class_idx = np.where(targets == c)[0]
+        rng.shuffle(class_idx)
+        proportions = rng.dirichlet(alpha * np.ones(num_clients))
+        counts = (proportions * len(class_idx)).astype(int)
+        counts[-1] = len(class_idx) - counts[:-1].sum()
+        splits = np.split(class_idx, np.cumsum(counts)[:-1])
+
+        for k, idx in enumerate(splits):
+            client_indices[k].extend(idx.tolist())
+
+    all_x = torch.stack([train_ds[i][0] for i in range(len(train_ds))])
+    all_y = torch.tensor(train_ds.targets, dtype=torch.long)
+
+    sizes = []
+
+    for i, idx in enumerate(client_indices):
+        idx_t = torch.tensor(idx, dtype=torch.long)
+        ds = TensorDataset(all_x[idx_t], all_y[idx_t])
+        torch.save(ds, CIFAR10_CLIENTS_DIR / f"client_{i}.pt")
+        sizes.append(len(idx))
+
+    val_x = torch.stack([test_ds[i][0] for i in range(len(test_ds))])
+    val_y = torch.tensor(test_ds.targets, dtype=torch.long)
+    torch.save(TensorDataset(val_x, val_y), CIFAR10_CLIENTS_DIR / "global_val.pt")
+
+    print(f"CIFAR-10 partitioned: {num_clients} clients, alpha={alpha}, seed={seed}")
+    print(f"Client sizes: min={min(sizes)}, max={max(sizes)}, mean={np.mean(sizes):.0f}")
+
 
 if __name__ == "__main__":
     process_leaf_femnist()
+    process_cifar10()
