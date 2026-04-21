@@ -1,9 +1,10 @@
 # src/models/registry.py
 
-from models.cnn import FEMNIST_CNN
+from models.cnn import FEMNIST_CNN, CIFAR10_CNN
 
 _REGISTRY = {
     'femnist': FEMNIST_CNN,
+    'cifar10': CIFAR10_CNN,
 }
 
 def get_model(dataset: str):

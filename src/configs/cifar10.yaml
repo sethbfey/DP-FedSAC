@@ -1,0 +1,35 @@
+# src/configs/cifar10.yaml
+
+wandb:
+  project_name: "DP-FedSAC"
+  entity: "sethbfey-university-of-south-dakota"
+  log_interval: 10
+
+federated_learning:
+  num_clients: 100           # N: Dirichlet(0.3) partition — fixed in paper
+  clients_per_round: 10      # K: q=0.1, matches Shi et al. (2023)
+  num_global_steps: 300      # T: at max_epsilon=6.72 and sigma=2.0, budget lasts ~447 rounds, so T is the binding limit
+  local_epochs: 1            # E: consistent with FEMNIST
+  learning_rate: 0.1         # eta_c: set by learning_rate_search.py
+  server_lr: 1.0             # eta_s: set by learning_rate_search.py
+  batch_size: 32
+  server_momentum: 0.0       # McMahan et al. (2018) DP-FedAvg uses no server momentum
+  dataset: "cifar10"
+
+differential_privacy:
+  rdp_alpha: 10              # RDP accounting divergence order
+  target_delta: 0.00001      # (epsilon, delta)-DP failure probability delta
+  max_epsilon: 6.72          # Same budget as FEMNIST
+  max_clipping_norm: 1.3469  # set by train_fedavg.py (p75 of gradient norms)
+  max_noise_multiplier: 5.0  # Upper bound for sigma_t (SAC agent action space)
+  min_noise_multiplier: 2.0  # Lower bound for sigma_t (SAC agent action space); fixed at 2.0 for all baselines
+
+sac_agent:
+  gamma: 0.99
+  tau_rho: 0.005
+  alpha_ent: 0.2
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  buffer_size: 1000000
+  batch_size: 256
+  reward_beta: 0.01

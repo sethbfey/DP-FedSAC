@@ -21,7 +21,7 @@ import wandb
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from models.cnn import FEMNIST_CNN
+from models.registry import get_model
 
 # Client-Server LR grid
 ETA_C_GRID = [0.01, 0.032, 0.1, 0.32]
@@ -59,7 +59,7 @@ def load_data(config, dataset_name):
 # A single FedAvg run using an LR combination
 def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, device, dataset_name):
     criterion = nn.CrossEntropyLoss()
-    model     = FEMNIST_CNN().to(device)
+    model     = get_model(dataset_name)().to(device)
 
     K    = config['federated_learning']['clients_per_round']
     N    = config['federated_learning']['num_clients']
@@ -149,7 +149,7 @@ def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, de
         if (t + 1) % 50 == 0:
             print(
                 f"  [ec={eta_c} es={eta_s}] round={t+1}  acc={acc:.4f}"
-                f"best={best_acc:.4f}  patience={patience_left}"
+                f"  best={best_acc:.4f}  patience={patience_left}"
             )
 
     wandb.summary['peak_val_acc'] = best_acc
