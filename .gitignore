@@ -28,9 +28,13 @@ src/checkpoints/
 # LEAF repository contents: https://github.com/TalwalkarLab/leaf
 src/data/leaf/
 
+# plotting scripts
+src/scripts/plot_*.py
+
 # Etcetera
 slurm/
 paper/
 presentation/
+src/scripts/rdp_to_dp.py
 tea_debug.log
 *.md
