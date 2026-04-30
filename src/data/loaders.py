@@ -85,7 +85,7 @@ def process_leaf_femnist():
     torch.save(global_val_dataset, FEMNIST_CLIENTS_DIR / "global_val.pt")
     print("FEMNIST PROCESSING COMPLETE")
 
-def process_cifar10(alpha=0.3, num_clients=100, seed=2026):
+def process_cifar10(alpha=0.3, num_clients=500, seed=2026):
     CIFAR10_CLIENTS_DIR.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
 
