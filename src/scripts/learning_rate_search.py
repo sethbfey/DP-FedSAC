@@ -1,207 +1,196 @@
 # src/scripts/learning_rate_search.py
-
-# $ python src/scripts/learning_rate_search.py 
-#     --rounds   [INT, default=500] 
-#     --patience [INT, default=200]
-#     --config   [STR, default="femnist"]
+#
+# W&B Bayesian sweep over (eta_c, eta_s) for FedAvg — with or without DP noise.
+# Without --dp: calibrates learning_rate and server_lr (used by non-DP scripts).
+# With    --dp: calibrates dp_learning_rate and dp_server_lr (used by all DP scripts).
+#
+# Steps:
+#   1. python src/scripts/learning_rate_search.py --config cifar10 [--dp] --create_sweep
+#   2. python src/scripts/learning_rate_search.py --config cifar10 [--dp] --sweep_id <id>
+#   3. python src/scripts/learning_rate_search.py --config cifar10 [--dp] --write_best --sweep_id <id>
 
 import re
 import sys
 import copy
+import random
 import argparse
-import yaml
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from pathlib import Path
 import wandb
+from pathlib import Path
+from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, eval_model, apply_aggregate
 
-# Client-Server LR grid
-ETA_C_GRID = [0.01, 0.032, 0.1, 0.32]
-ETA_S_GRID = [0.316, 1.0, 3.16, 10.0]
+# Non-DP
+SWEEP_CONFIG_NODP = {
+    "method": "bayes",
+    "metric": {"name": "val_acc", "goal": "maximize"},
+    "parameters": {
+        "eta_c": {"distribution": "log_uniform_values", "min": 0.01,  "max": 1.0},
+        "eta_s": {"distribution": "log_uniform_values", "min": 0.1,   "max": 10.0},
+    },
+    "early_terminate": {"type": "hyperband", "min_iter": 30, "eta": 3},
+}
 
-def load_config(path: Path):
-    with path.open('r') as f:
-        return yaml.safe_load(f)
+# DP
+SWEEP_CONFIG_DP = {
+    "method": "bayes",
+    "metric": {"name": "val_acc", "goal": "maximize"},
+    "parameters": {
+        "eta_c": {"distribution": "log_uniform_values", "min": 0.001, "max": 0.1},
+        "eta_s": {"distribution": "log_uniform_values", "min": 0.1,   "max": 3.0},
+    },
+    "early_terminate": {"type": "hyperband", "min_iter": 30, "eta": 3},
+}
 
-def write_lr_to_config(config_path: Path, eta_c, eta_s):
-    content = config_path.read_text()
-    content = re.sub(r'(learning_rate:\s*)[0-9.e+-]+', rf'\g<1>{eta_c}', content)
-    content = re.sub(r'(server_lr:\s*)[0-9.e+-]+', rf'\g<1>{eta_s}', content)
-    config_path.write_text(content)
+def run_trial(config, client_datasets, val_loader, dataset_name, rounds, dp):
+    mode = "dp-lr-search" if dp else "lr-search"
+    wandb.init(group=f"{dataset_name}/{mode}")
+    eta_c = wandb.config.eta_c
+    eta_s = wandb.config.eta_s
 
-def get_device():
-    if torch.backends.mps.is_available(): return torch.device('mps')
-    elif torch.cuda.is_available(): return torch.device('cuda')
-    return torch.device('cpu')
-
-def load_data(config, dataset_name):
-    clients_dir = ROOT / 'src' / 'data' / 'clients' / dataset_name
-    N = config['federated_learning']['num_clients']
-    
-    print(f"Loading {N} client datasets from {clients_dir}...")
-    datasets = [
-        torch.load(clients_dir / f'client_{i}.pt', weights_only=False)
-        for i in range(N)
-    ]
-    val = torch.load(clients_dir / 'global_val.pt', weights_only=False)
-    val_loader = DataLoader(val, batch_size=256, shuffle=False)
-    print("Done loading\n")
-    return datasets, val_loader
-
-# A single FedAvg run using an LR combination
-def run_one(config, datasets, val_loader, eta_c, eta_s, max_rounds, patience, device, dataset_name):
+    device    = get_device()
     criterion = nn.CrossEntropyLoss()
     model     = get_model(dataset_name)().to(device)
 
-    K    = config['federated_learning']['clients_per_round']
-    N    = config['federated_learning']['num_clients']
-    E    = config['federated_learning']['local_epochs']
-    bs   = config['federated_learning']['batch_size']
-    beta = config['federated_learning']['server_momentum']
+    K       = config['federated_learning']['clients_per_round']
+    N       = config['federated_learning']['num_clients']
+    c_fixed = config['differential_privacy']['max_clipping_norm']
+    sigma   = config['differential_privacy']['min_noise_multiplier']
+    E       = config['federated_learning']['local_epochs']
+    bs      = config['federated_learning']['batch_size']
 
-    momentum_buf  = None
-    best_acc      = 0.0
-    patience_left = patience
-
-    run = wandb.init(
-        project=config['wandb']['project_name'],
-        entity=config['wandb']['entity'],
-        group=f'{dataset_name}/lr-search',
-        name=f'eta_c={eta_c}/eta_s={eta_s}',
-        config={
-            'eta_c': eta_c, 'eta_s': eta_s, 'server_momentum': beta,
-            'K': K, 'N': N, 'E': E, 'batch_size': bs,
-            'max_rounds': max_rounds, 'patience': patience,
-        },
-        reinit=True,
-    )
     wandb.define_metric('round')
     wandb.define_metric('*', step_metric='round')
 
-    for t in range(max_rounds):
-        selected = np.random.default_rng(2026 + t).choice(N, size=K, replace=False)
-
+    for t in range(rounds):
+        selected   = select_clients(t, N, K)
         raw_deltas = []
 
         for cid in selected:
             local = copy.deepcopy(model)
             local.train()
-            opt = optim.SGD(local.parameters(), lr=eta_c)
-            loader = DataLoader(datasets[int(cid)], batch_size=bs, shuffle=True)
-
+            loader = DataLoader(client_datasets[int(cid)], batch_size=bs, shuffle=True)
             for _ in range(E):
                 for x, y in loader:
                     x, y = x.to(device), y.to(device)
-                    opt.zero_grad()
+                    for p in local.parameters():
+                        if p.grad is not None:
+                            p.grad.detach_()
+                            p.grad.zero_()
                     criterion(local(x), y).backward()
-                    opt.step()
+                    with torch.no_grad():
+                        for p in local.parameters():
+                            if p.grad is not None:
+                                p.data.sub_(eta_c * p.grad)
 
             with torch.no_grad():
                 dw = torch.cat([
-                    (lp.data - gp.data).view(-1)
+                    (lp.data - gp.data).view(-1).cpu()
                     for lp, gp in zip(local.parameters(), model.parameters())
                 ])
-
             raw_deltas.append(dw)
 
         with torch.no_grad():
-            agg = torch.stack(raw_deltas).mean(dim=0)
+            if dp:
+                clipped = [dw * min(1.0, c_fixed / (dw.norm(2).item() + 1e-8)) for dw in raw_deltas]
+                agg = torch.stack(clipped).sum(dim=0)
+                agg.add_(torch.randn_like(agg) * sigma * c_fixed)
+                agg.div_(K)
+            else:
+                agg = torch.stack(raw_deltas).mean(dim=0)
 
-            if momentum_buf is None: momentum_buf = agg.clone()
-            else: momentum_buf.mul_(beta).add_(agg)
-            offset = 0
-            for p in model.parameters():
-                numel = p.numel()
-                p.data.add_(eta_s * momentum_buf[offset:offset + numel].view_as(p.data))
-                offset += numel
+        apply_aggregate(model, (eta_s * agg).to(device))
 
-        model.eval()
-        correct, total = 0, 0
+        loss, acc = eval_model(model, val_loader, criterion, device)
+        wandb.log({"round": t + 1, "val_acc": acc, "val_loss": loss})
 
-        with torch.no_grad():
-            for x, y in val_loader:
-                x, y = x.to(device), y.to(device)
-                correct += (model(x).argmax(1) == y).sum().item()
-                total   += x.size(0)
+        if not torch.isfinite(torch.tensor(loss)):
+            wandb.log({"val_acc": 0.0})
+            break
 
-        model.train()
-        acc = correct / total
-        wandb.log({'round': t + 1, 'val_acc': acc})
-
-        if acc > best_acc:
-            best_acc      = acc
-            patience_left = patience
-        else:
-            patience_left -= 1
-            if patience_left <= 0:
-                print(f"  [ec={eta_c} es={eta_s}] early stop round {t+1}  "
-                      f"peak_acc={best_acc:.4f}")
-                break
-
-        if (t + 1) % 50 == 0:
-            print(
-                f"  [ec={eta_c} es={eta_s}] round={t+1}  acc={acc:.4f}"
-                f"  best={best_acc:.4f}  patience={patience_left}"
-            )
-
-    wandb.summary['peak_val_acc'] = best_acc
     wandb.finish()
-    return best_acc
 
-# Grid search
+def write_best_to_config(config, config_name, sweep_id, dp):
+    entity  = config['wandb']['entity']
+    project = config['wandb']['project_name']
+
+    api      = wandb.Api()
+    sweep    = api.sweep(f"{entity}/{project}/{sweep_id}")
+    best_run = sweep.best_run()
+
+    eta_c = best_run.config['eta_c']
+    eta_s = best_run.config['eta_s']
+
+    config_path = ROOT / 'src' / 'configs' / f'{config_name}.yaml'
+    content     = config_path.read_text()
+
+    if dp:
+        content = re.sub(r'(dp_learning_rate:\s*)\S+', rf'\g<1>{eta_c}', content)
+        content = re.sub(r'(dp_server_lr:\s*)\S+',     rf'\g<1>{eta_s}', content)
+        lr_key, server_key = 'dp_learning_rate', 'dp_server_lr'
+    else:
+        content = re.sub(r'(learning_rate:\s*)[0-9.e+-]+', rf'\g<1>{eta_c}', content)
+        content = re.sub(r'(server_lr:\s*)[0-9.e+-]+',     rf'\g<1>{eta_s}', content)
+        lr_key, server_key = 'learning_rate', 'server_lr'
+
+    config_path.write_text(content)
+
+    print(f"Best run: {best_run.name}")
+    print(f"  val_acc    = {best_run.summary.get('val_acc', 'n/a'):.4f}")
+    print(f"  {lr_key:<20} = {eta_c}")
+    print(f"  {server_key:<20} = {eta_s}")
+    print(f"Written to {config_path}")
+
 def main():
-    parser = argparse.ArgumentParser(description='LR Search: eta_c x eta_s grid search.')
-    parser.add_argument('--rounds', type=int, default=500)
-    parser.add_argument('--patience', type=int, default=100)
-    parser.add_argument('--config', type=str, default='femnist')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config',       type=str, efault='cifar10')
+    parser.add_argument('--rounds',       type=int, default=None)
+    parser.add_argument('--dp',           action='store_true')
+    parser.add_argument('--create_sweep', action='store_true')
+    parser.add_argument('--write_best',   action='store_true')
+    parser.add_argument('--sweep_id',     type=str, default=None)
     args = parser.parse_args()
 
-    config_path = ROOT / 'src' / 'configs' / f"{args.config}.yaml"
-    
+    config_path = ROOT / 'src' / 'configs' / f'{args.config}.yaml'
     if not config_path.exists():
-        raise FileNotFoundError(f"No YAML config found at: {config_path}")
-
+        raise FileNotFoundError(f"No config found at: {config_path}")
     config = load_config(config_path)
-    device = get_device()
-    datasets, val_loader = load_data(config, args.config)
 
-    results = {}  # (eta_c, eta_s) -> peak_acc
-    total = len(ETA_C_GRID) * len(ETA_S_GRID)
-    done  = 0
-    
-    for eta_c in ETA_C_GRID:
-        for eta_s in ETA_S_GRID:
-            done += 1
-            print(f"\n[{done}/{total}] eta_c={eta_c} eta_s={eta_s}")
-            acc = run_one(config, datasets, val_loader, eta_c, eta_s, args.rounds, args.patience, device, args.config)
-            results[(eta_c, eta_s)] = acc
-            print(f"  -> peak_acc={acc:.4f}")
+    rounds = args.rounds or (150 if args.dp else 300)
+    sweep_config = SWEEP_CONFIG_DP if args.dp else SWEEP_CONFIG_NODP
+    mode_label   = "DP" if args.dp else "non-DP"
 
-    # Select best combination
-    best_pair = max(results, key=results.get)
-    best_acc  = results[best_pair]
-    best_ec, best_es = best_pair
+    if args.create_sweep:
+        sweep_id = wandb.sweep(
+            sweep_config,
+            project=config['wandb']['project_name'],
+            entity=config['wandb']['entity'],
+        )
+        flag = " --dp" if args.dp else ""
+        print(f"\n{mode_label} sweep created: {sweep_id}")
+        print(f"Run agents with:")
+        print(f"  python src/scripts/learning_rate_search.py --config {args.config}{flag} --sweep_id {sweep_id}")
+        return
 
-    print(f"LR Search results for {args.config}:")
-    for (ec, es), acc in sorted(results.items()):
-        marker = " <-" if (ec, es) == best_pair else ""
-        print(f"  eta_c={ec:<6} eta_s={es:<6} acc={acc:.4f}{marker}")
-        
-    print(f"\nBest: eta_c={best_ec} eta_s={best_es} acc={best_acc:.4f}")
-    print(f"Writing to {config_path}...")
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
 
-    write_lr_to_config(config_path, best_ec, best_es)
-    
-    print("Done")
+    client_datasets, val_loader = load_data(config, args.config)
 
+    wandb.agent(
+        args.sweep_id,
+        function=lambda: run_trial(config, client_datasets, val_loader, args.config, rounds, args.dp),
+        project=config['wandb']['project_name'],
+        entity=config['wandb']['entity'],
+    )
 
 if __name__ == '__main__':
     main()
