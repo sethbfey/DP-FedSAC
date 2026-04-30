@@ -15,6 +15,10 @@ wheels/
 # WandB local run directory
 wandb/
 
+# WandB exported logs
+src/logs/
+src/plots/
+
 # Client files
 src/data/clients/
 
@@ -29,8 +33,4 @@ slurm/
 paper/
 presentation/
 tea_debug.log
-notes.md
-new_model_template.md
-hpc_setup.md
-experiments.md
-cifar10_experimentation_plan.md
+*.md
