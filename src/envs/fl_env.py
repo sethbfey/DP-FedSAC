@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 
 from models.registry import get_model
 from utils.rdp import rdp_per_round
+from utils.fl_utils import get_dp_lr, get_dp_server_lr
 
 # Synchronous DP-FedAvg environment for the DP-FedSAC agent.
 class FL_DP_Env(gym.Env):
@@ -25,8 +26,8 @@ class FL_DP_Env(gym.Env):
         self.clients_per_round = config['federated_learning']['clients_per_round']
         self.max_rounds        = config['federated_learning']['num_global_steps']
         self.local_epochs      = config['federated_learning']['local_epochs']
-        self.lr                = config['federated_learning']['learning_rate']
-        self.server_lr         = config['federated_learning']['server_lr']
+        self.lr                = get_dp_lr(config)
+        self.server_lr         = get_dp_server_lr(config)
         self.batch_size        = config['federated_learning']['batch_size']
         self.server_momentum   = config['federated_learning']['server_momentum']
 
@@ -74,8 +75,8 @@ class FL_DP_Env(gym.Env):
         else:
             self.device = torch.device('cpu')
 
-        ROOT        = Path(__file__).resolve().parent.parent.parent
-        dataset     = config['federated_learning']['dataset']
+        ROOT = Path(__file__).resolve().parent.parent.parent
+        dataset = config['federated_learning']['dataset']
         self.model_cls = get_model(dataset)
         clients_dir = ROOT / 'src' / 'data' / 'clients' / dataset
 

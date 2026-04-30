@@ -20,14 +20,14 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
-from utils.fl_utils  import load_config, get_device, load_data, select_clients, eval_model, apply_aggregate
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, eval_model, apply_aggregate, get_dp_lr, get_dp_server_lr
 from utils.rdp       import rdp_per_round
 
 def local_train_scaffold(global_model, dataset, config, criterion, device, client_c, server_c):
     local_model = copy.deepcopy(global_model)
     local_model.train()
 
-    eta_c  = config['federated_learning']['learning_rate']
+    eta_c  = get_dp_lr(config)
     E      = config['federated_learning']['local_epochs']
     loader = DataLoader(
         dataset,
@@ -85,8 +85,8 @@ def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name, 
     T         = config['federated_learning']['num_global_steps']
     C_w       = config['differential_privacy']['max_clipping_norm']
     E         = config['federated_learning']['local_epochs']
-    eta_c     = config['federated_learning']['learning_rate']
-    server_lr = config['federated_learning']['server_lr']
+    eta_c     = get_dp_lr(config)
+    server_lr = get_dp_server_lr(config)
     rdp_alpha = config['differential_privacy']['rdp_alpha']
     max_eps   = config['differential_privacy']['max_epsilon']
 
@@ -108,7 +108,7 @@ def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name, 
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
-            'eta_c':           config['federated_learning']['learning_rate'],
+            'eta_c':           get_dp_lr(config),
             'eta_s':           server_lr,
             'server_momentum': 0.0,   # SCAFFOLD handles drift via control variates
             'batch_size':      config['federated_learning']['batch_size'],
@@ -159,9 +159,7 @@ def run_dp_scaffold(config, client_datasets, val_loader, sigma_t, dataset_name, 
         m_norm      = float(raw_norms_w.median())
 
         with torch.no_grad():
-            # Clip Δ_w to C_w (model updates)
             clipped_w = [dw * min(1.0, C_w / (dw.norm(2).item() + 1e-8)) for dw in raw_delta_w]
-            # Clip Δ_c to C_c (control updates)
             clipped_c = [dc * min(1.0, C_c / (dc.norm(2).item() + 1e-8)) for dc in raw_delta_c]
 
             # Model update aggregation

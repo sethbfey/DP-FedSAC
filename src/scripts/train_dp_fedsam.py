@@ -21,14 +21,14 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
-from utils.fl_utils  import load_config, get_device, load_data, select_clients, eval_model, apply_aggregate
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, eval_model, apply_aggregate, get_dp_lr, get_dp_server_lr
 from utils.rdp       import rdp_per_round
 
 def local_train_sam(global_model, dataset, config, criterion, device, rho):
     local_model = copy.deepcopy(global_model)
     local_model.train()
 
-    eta_c  = config['federated_learning']['learning_rate']
+    eta_c  = get_dp_lr(config)
     E      = config['federated_learning']['local_epochs']
     loader = DataLoader(
         dataset,
@@ -87,7 +87,7 @@ def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_nam
     N         = config['federated_learning']['num_clients']
     T         = config['federated_learning']['num_global_steps']
     c_fixed   = config['differential_privacy']['max_clipping_norm']
-    server_lr = config['federated_learning']['server_lr']
+    server_lr = get_dp_server_lr(config)
     server_mo = config['federated_learning']['server_momentum']
     rdp_alpha = config['differential_privacy']['rdp_alpha']
     max_eps   = config['differential_privacy']['max_epsilon']
@@ -105,7 +105,7 @@ def run_dp_fedsam(config, client_datasets, val_loader, sigma_t, rho, dataset_nam
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
-            'eta_c':           config['federated_learning']['learning_rate'],
+            'eta_c':           get_dp_lr(config),
             'eta_s':           server_lr,
             'server_momentum': server_mo,
             'batch_size':      config['federated_learning']['batch_size'],

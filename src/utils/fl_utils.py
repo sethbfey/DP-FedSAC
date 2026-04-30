@@ -35,10 +35,20 @@ def load_data(config, dataset_name):
 def select_clients(round_t, num_clients, k):
     return np.random.default_rng(2026 + round_t).choice(num_clients, size=k, replace=False)
 
-def local_train(global_model, dataset, config, criterion, device):
+def get_dp_lr(config):
+    fl = config['federated_learning']
+    return fl.get('dp_learning_rate') or fl['learning_rate']
+
+def get_dp_server_lr(config):
+    fl = config['federated_learning']
+    return fl.get('dp_server_lr') or fl['server_lr']
+
+def local_train(global_model, dataset, config, criterion, device, lr=None):
     local_model = copy.deepcopy(global_model)
     local_model.train()
-    optimizer = optim.SGD(local_model.parameters(), lr=config['federated_learning']['learning_rate'])
+    if lr is None:
+        lr = config['federated_learning']['learning_rate']
+    optimizer = optim.SGD(local_model.parameters(), lr=lr)
     loader    = DataLoader(dataset, batch_size=config['federated_learning']['batch_size'], shuffle=True)
 
     for _ in range(config['federated_learning']['local_epochs']):

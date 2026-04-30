@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
-from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate, get_dp_lr, get_dp_server_lr
 from utils.rdp       import rdp_per_round
 
 def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_frac, dataset_name, seed):
@@ -32,7 +32,7 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
     N         = config['federated_learning']['num_clients']
     T         = config['federated_learning']['num_global_steps']
     c_fixed   = config['differential_privacy']['max_clipping_norm']
-    server_lr = config['federated_learning']['server_lr']
+    server_lr = get_dp_server_lr(config)
     server_mo = config['federated_learning']['server_momentum']
     rdp_alpha = config['differential_privacy']['rdp_alpha']
     max_eps   = config['differential_privacy']['max_epsilon']
@@ -50,11 +50,11 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
         project=config['wandb']['project_name'],
         entity=config['wandb']['entity'],
         group=f'{dataset_name}/time-adaptive',
-        name=f'sigma={sigma_t}_K_save={K_save}_seed={seed}',
+        name=f'K_save={K_save}_T_n_frac={T_n_frac}_seed={seed}',
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
-            'eta_c':           config['federated_learning']['learning_rate'],
+            'eta_c':           get_dp_lr(config),
             'eta_s':           server_lr,
             'server_momentum': server_mo,
             'batch_size':      config['federated_learning']['batch_size'],
@@ -83,7 +83,7 @@ def run_time_adaptive(config, client_datasets, val_loader, sigma_t, K_save, T_n_
         delta_eps     = delta_eps_save if in_saving else delta_eps_spend
 
         selected   = select_clients(t, N, k_this_round)
-        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device)
+        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device, lr=get_dp_lr(config))
                       for cid in selected]
         raw_deltas = [dw for dw in raw_deltas if torch.isfinite(dw).all()]
         n_nan      = k_this_round - len(raw_deltas)

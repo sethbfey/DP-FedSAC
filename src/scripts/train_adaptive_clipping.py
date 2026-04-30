@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
-from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate, get_dp_lr, get_dp_server_lr
 from utils.rdp       import rdp_per_round
 
 def run_adaptive_clipping(config, client_datasets, val_loader, sigma_t, gamma_target, eta_C, sigma_b, dataset_name, seed):
@@ -34,7 +34,7 @@ def run_adaptive_clipping(config, client_datasets, val_loader, sigma_t, gamma_ta
     N         = config['federated_learning']['num_clients']
     T         = config['federated_learning']['num_global_steps']
     C_init    = config['differential_privacy']['max_clipping_norm']
-    server_lr = config['federated_learning']['server_lr']
+    server_lr = get_dp_server_lr(config)
     server_mo = config['federated_learning']['server_momentum']
     rdp_alpha = config['differential_privacy']['rdp_alpha']
     max_eps   = config['differential_privacy']['max_epsilon']
@@ -56,7 +56,7 @@ def run_adaptive_clipping(config, client_datasets, val_loader, sigma_t, gamma_ta
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
-            'eta_c':           config['federated_learning']['learning_rate'],
+            'eta_c':           get_dp_lr(config),
             'eta_s':           server_lr,
             'server_momentum': server_mo,
             'batch_size':      config['federated_learning']['batch_size'],
@@ -85,7 +85,7 @@ def run_adaptive_clipping(config, client_datasets, val_loader, sigma_t, gamma_ta
     for t in range(T):
         C_t        = math.exp(log_C)
         selected   = select_clients(t, N, K)
-        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device)
+        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device, lr=get_dp_lr(config))
                       for cid in selected]
         raw_deltas = [dw for dw in raw_deltas if torch.isfinite(dw).all()]
         n_nan      = K - len(raw_deltas)
@@ -94,7 +94,7 @@ def run_adaptive_clipping(config, client_datasets, val_loader, sigma_t, gamma_ta
         f_clip    = float((raw_norms > C_t).float().mean().item())
         m_norm    = float(raw_norms.median().item())
 
-        # Unclipped indicator b_i = 1[||Δ_w_i|| <= C_t]; release noisy sum, form fraction.
+        # Unclipped indicator b_i = 1[||Δ_w_i|| <= C_t]
         b_sum       = float((raw_norms <= C_t).float().sum().item())
         b_sum_noisy = b_sum + float(np.random.randn() * sigma_b)
         b_hat       = b_sum_noisy / K

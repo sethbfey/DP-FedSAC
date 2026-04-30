@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from models.registry import get_model
-from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate
+from utils.fl_utils  import load_config, get_device, load_data, select_clients, local_train, eval_model, apply_aggregate, get_dp_lr, get_dp_server_lr
 from utils.rdp       import rdp_per_round
 
 def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name, seed):
@@ -30,7 +30,7 @@ def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name, se
     N         = config['federated_learning']['num_clients']
     T         = config['federated_learning']['num_global_steps']
     c_fixed   = config['differential_privacy']['max_clipping_norm']
-    server_lr = config['federated_learning']['server_lr']
+    server_lr = get_dp_server_lr(config)
     server_mo = config['federated_learning']['server_momentum']
     rdp_alpha = config['differential_privacy']['rdp_alpha']
     max_eps   = config['differential_privacy']['max_epsilon']
@@ -48,7 +48,7 @@ def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name, se
         config={
             'N': N, 'K': K, 'T': T,
             'E':               config['federated_learning']['local_epochs'],
-            'eta_c':           config['federated_learning']['learning_rate'],
+            'eta_c':           get_dp_lr(config),
             'eta_s':           server_lr,
             'server_momentum': server_mo,
             'batch_size':      config['federated_learning']['batch_size'],
@@ -69,7 +69,7 @@ def run_dp_fedavg(config, client_datasets, val_loader, sigma_t, dataset_name, se
     final_round = T
     for t in range(T):
         selected   = select_clients(t, N, K)
-        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device)
+        raw_deltas = [local_train(model, client_datasets[int(cid)], config, criterion, device, lr=get_dp_lr(config))
                       for cid in selected]
 
         raw_norms = torch.stack([dw.norm(2) for dw in raw_deltas])
