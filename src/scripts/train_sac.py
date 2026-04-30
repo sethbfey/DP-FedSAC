@@ -143,6 +143,10 @@ def evaluate(config, agent, num_eval_episodes=1):
                 'C_t':           info['C_t'],
                 'sigma_t':       info['sigma_t'],
             })
+            print(f"[eval ep {ep}] round={round_num:>4}  val_acc={info['acc_after']:.4f}  "
+                  f"epsilon={env.current_epsilon:.3f}/{config['differential_privacy']['max_epsilon']}  "
+                  f"C_t={info['C_t']:.4f}  sigma_t={info['sigma_t']:.4f}  "
+                  f"f_clip={info['f_clip']:.3f}  m_norm={info['m_norm']:.4f}")
 
         acc_list.append(info['acc_after'])
         eps_list.append(env.current_epsilon)
@@ -206,6 +210,39 @@ def main():
 
     beta = config['sac_agent']['reward_beta']
 
+    if args.eval_only:
+        if not args.resume: raise ValueError("--eval_only requires --resume <checkpoint path>")
+        fl = config['federated_learning']
+        dp = config['differential_privacy']
+        wandb.init(
+            project=config['wandb']['project_name'],
+            entity=config['wandb']['entity'],
+            group=f'{args.config}/dp-fedsac',
+            name=f'eval_beta={beta}_seed={args.seed}',
+            config={
+                'N': fl['num_clients'], 'K': fl['clients_per_round'],
+                'T': fl['num_global_steps'],
+                'C_max': dp['max_clipping_norm'], 'sigma_min': dp['min_noise_multiplier'],
+                'sigma_max': dp['max_noise_multiplier'], 'rdp_alpha': dp['rdp_alpha'],
+                'max_epsilon': dp['max_epsilon'],
+                'reward_beta': beta, 'seed': args.seed,
+            }
+        )
+        wandb.define_metric('round')
+        wandb.define_metric('val_acc',       step_metric='round')
+        wandb.define_metric('epsilon',       step_metric='round')
+        wandb.define_metric('delta_epsilon', step_metric='round')
+        wandb.define_metric('f_clip',        step_metric='round')
+        wandb.define_metric('m_norm',        step_metric='round')
+        wandb.define_metric('C_t',           step_metric='round')
+        wandb.define_metric('sigma_t',       step_metric='round')
+        agent = SAC(obs_dim=6, action_dim=2, config=config)
+        print(f"Evaluation only — loading checkpoint: {args.resume}")
+        agent.load(args.resume)
+        evaluate(config, agent, num_eval_episodes=args.eval_episodes)
+        wandb.finish()
+        return
+
     # Resume support
     saved_run_id = None
     if args.resume:
@@ -267,14 +304,6 @@ def main():
     start_episode = 1
     start_steps   = 0
 
-    if args.eval_only:
-        if not args.resume: raise ValueError("--eval_only requires --resume <checkpoint path>")
-        print(f"Evaluation only — loading checkpoint: {args.resume}")
-        agent.load(args.resume)
-        evaluate(config, agent, num_eval_episodes=args.eval_episodes)
-        wandb.finish()
-        return
-
     if args.resume:
         print(f"Resuming from checkpoint: {args.resume}")
         start_episode, start_steps = agent.load(args.resume)
@@ -300,9 +329,6 @@ def main():
     artifact.add_file(args.save_path)
     run.log_artifact(artifact)
     print(f"\nAgent saved to {args.save_path}")
-
-    # Evaluation
-    evaluate(config, agent, num_eval_episodes=args.eval_episodes)
     wandb.finish()
 
 
